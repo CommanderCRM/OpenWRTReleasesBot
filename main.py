@@ -95,6 +95,12 @@ def send_welcome(message):
 
     bot.reply_to(message, "This bot can check for new OpenWRT versions. Your ID is now in the DB, the bot will notify you.")
 
+@bot.message_handler(commands=['current'])
+def send_current_version(message):
+    version = get_latest_openwrt_version()
+
+    bot.reply_to(message, f'Current OpenWRT version is {version}')
+
 def check_all_users():
     conn, c = db_cursor()
     latest_version = get_latest_openwrt_version()
