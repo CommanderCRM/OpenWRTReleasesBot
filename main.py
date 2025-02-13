@@ -5,7 +5,10 @@ import schedule
 import time
 import sqlite3
 import os
-import semver
+import re
+from typing import Optional, Tuple
+from semver import Version
+from packaging.utils import canonicalize_version
 
 API_TOKEN = os.getenv("API_TOKEN")
 bot = telebot.TeleBot(API_TOKEN)
@@ -19,6 +22,45 @@ def db_cursor():
 _, c = db_cursor()
 c.execute('''CREATE TABLE IF NOT EXISTS users
                 (chat_id INTEGER PRIMARY KEY, last_version TEXT)''')
+
+BASEVERSION = re.compile(
+    r"""[vV]?
+        (?P<major>0|[1-9]\d*)
+        (\.
+        (?P<minor>0|[1-9]\d*)
+        (\.
+            (?P<patch>0|[1-9]\d*)
+        )?
+        )?
+    """,
+    re.VERBOSE,
+)
+
+def coerce(version: str) -> Tuple[Version, Optional[str]]:
+    """
+    Convert an incomplete version string into a semver-compatible Version
+    object
+
+    * Tries to detect a "basic" version string (``major.minor.patch``).
+    * If not enough components can be found, missing components are
+        set to zero to obtain a valid semver version.
+
+    :param str version: the version string to convert
+    :return: a tuple with a :class:`Version` instance (or ``None``
+        if it's not a version) and the rest of the string which doesn't
+        belong to a basic version.
+    :rtype: tuple(:class:`Version` | None, str)
+    """
+    match = BASEVERSION.search(version)
+    if not match:
+        return (None, version)
+
+    ver = {
+        key: 0 if value is None else value for key, value in match.groupdict().items()
+    }
+    ver = Version(**ver)
+    rest = match.string[match.end() :]  # noqa:E203
+    return ver, rest
 
 def get_latest_openwrt_version():
     url = 'https://downloads.openwrt.org/releases/'
@@ -34,7 +76,11 @@ def get_latest_openwrt_version():
             if version and all(part.isdigit() for part in version.split('.')):
                 versions.append(version)
 
-    latest_version = max(versions, key=semver.Version.parse)
+    # OpenWRT uses "XX.YY.Z" versioning scheme where first Y is usually 0.
+    # First we need to canonicalize it, result will be XX.Y.
+    # Then the result is transformed into XX.Y.Z via coerce().
+    versions = [coerce(canonicalize_version(v))[0] for v in versions]
+    latest_version = max(versions)
 
     return latest_version
 
@@ -64,7 +110,7 @@ def check_all_users():
     conn.commit()
     conn.close()
 
-schedule.every().day.at("09:00").do(check_all_users)
+schedule.every().day.at("05:00").do(check_all_users)
 
 while True:
     bot.polling()
